@@ -36,7 +36,7 @@ func TestBasic(t *testing.T) {
 	defer subn.Unsubscribe()
 
 	var dm DummyMessage
-	if err := nrpc.Call(
+	if err := nrpc.Call(context.Background(),
 		&DummyMessage{Foobar: "hello"}, &dm, nc, "foo.bar", "protobuf", 5*time.Second,
 	); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestDecode(t *testing.T) {
 	for _, n := range names {
 		name = n
 		var dm DummyMessage
-		if err := nrpc.Call(
+		if err := nrpc.Call(context.Background(),
 			&DummyMessage{Foobar: "hello"}, &dm, nc, "foo."+name, "protobuf", 5*time.Second,
 		); err != nil {
 			t.Fatal(err)
@@ -227,7 +227,7 @@ func TestError(t *testing.T) {
 	}
 	defer subn.Unsubscribe()
 
-	err = nrpc.Call(&DummyMessage{Foobar: "hello"}, &DummyMessage{}, nc, "foo.bar", "protobuf", 5*time.Second)
+	err = nrpc.Call(context.Background(), &DummyMessage{Foobar: "hello"}, &DummyMessage{}, nc, "foo.bar", "protobuf", 5*time.Second)
 	if err == nil {
 		t.Fatal("error expected")
 	}
@@ -254,7 +254,7 @@ func TestTimeout(t *testing.T) {
 	}
 	defer subn.Unsubscribe()
 
-	err = nrpc.Call(&DummyMessage{Foobar: "hello"}, &DummyMessage{}, nc, "foo.bar", "protobuf", 500*time.Millisecond)
+	err = nrpc.Call(context.Background(), &DummyMessage{Foobar: "hello"}, &DummyMessage{}, nc, "foo.bar", "protobuf", 500*time.Millisecond)
 	if err == nil {
 		t.Fatal("error expected")
 	} else if err.Error() != "nats: timeout" {
