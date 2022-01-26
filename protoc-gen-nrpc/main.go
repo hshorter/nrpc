@@ -461,7 +461,6 @@ func main() {
 		var fd *descriptor.FileDescriptorProto
 		for _, fd = range request.GetProtoFile() {
 			if name == fd.GetName() {
-				log.Println("Using name:" + fd.GetName())
 				break
 			}
 		}
