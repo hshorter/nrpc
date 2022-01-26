@@ -247,6 +247,7 @@ func getPkgImportName(goPkg string) string {
 
 var pluginPrometheus bool
 var pathsSourceRelative bool
+var excludeDirs = make([]string, 0)
 
 var funcMap = template.FuncMap{
 	"GoPackageName": func(fd *descriptor.FileDescriptorProto) string {
@@ -444,6 +445,10 @@ func main() {
 			} else {
 				log.Fatalf(`unknown path type %q: want "import" or "source_relative"`, value)
 			}
+		case "exclude_dirs":
+			if value != "" {
+				excludeDirs = strings.Split(value, ";")
+			}
 		}
 	}
 
@@ -456,6 +461,7 @@ func main() {
 		var fd *descriptor.FileDescriptorProto
 		for _, fd = range request.GetProtoFile() {
 			if name == fd.GetName() {
+				log.Println("Using name:" + fd.GetName())
 				break
 			}
 		}
@@ -464,6 +470,11 @@ func main() {
 		}
 
 		currentFile = fd
+
+		if shouldIgnoreDir(currentFile.GetName()) {
+			currentFile = nil
+			continue
+		}
 
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, fd); err != nil {
@@ -484,4 +495,14 @@ func main() {
 	if _, err := os.Stdout.Write(data); err != nil {
 		log.Fatalf("error: failed to write output proto: %v", err)
 	}
+}
+
+func shouldIgnoreDir(protoName string) bool {
+	for i := range excludeDirs {
+		if strings.HasPrefix(protoName, excludeDirs[i]) {
+			currentFile = nil
+			return true
+		}
+	}
+	return false
 }
