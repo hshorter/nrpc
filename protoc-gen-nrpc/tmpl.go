@@ -26,32 +26,6 @@ import (
 
 {{- range .Service}}
 
-// {{.GetName}}Server is the interface that providers of the service
-// {{.GetName}} should implement.
-type {{.GetName}}Server interface {
-	{{- range .Method}}
-	{{- if ne .GetInputType ".nrpc.NoRequest"}}
-	{{- $resultType := GetResultType .}}
-	{{.GetName}}(ctx context.Context
-		{{- range GetMethodSubjectParams . -}}
-		, {{ . }} string
-		{{- end -}}
-		{{- if ne .GetInputType ".nrpc.Void" -}}
-		, req {{GoType .GetInputType}}
-		{{- end -}}
-		{{- if HasStreamedReply . -}}
-		, pushRep func({{GoType .GetOutputType}})
-		{{- end -}}
-	)
-		{{- if ne $resultType ".nrpc.NoReply" }} (
-		{{- if and (ne $resultType ".nrpc.Void") (not (HasStreamedReply .)) -}}
-		resp {{GoType $resultType}}, {{end -}}
-		err error)
-		{{- end -}}
-	{{- end}}
-	{{- end}}
-}
-
 {{- if Prometheus}}
 
 var (
@@ -103,9 +77,9 @@ var (
 )
 {{- end}}
 
-// {{.GetName}}Handler provides a NATS subscription handler that can serve a
+// {{.GetName}}NrpcHandler provides a NATS subscription handler that can serve a
 // subscription using a given {{.GetName}}Server implementation.
-type {{.GetName}}Handler struct {
+type {{.GetName}}NrpcHandler struct {
 	ctx     context.Context
 	workers *nrpc.WorkerPool
 	nc      nrpc.NatsConn
@@ -114,8 +88,8 @@ type {{.GetName}}Handler struct {
 	encodings []string
 }
 
-func New{{.GetName}}Handler(ctx context.Context, nc nrpc.NatsConn, s {{.GetName}}Server) *{{.GetName}}Handler {
-	return &{{.GetName}}Handler{
+func New{{.GetName}}NrpcHandler(ctx context.Context, nc nrpc.NatsConn, s {{.GetName}}Server) *{{.GetName}}NrpcHandler {
+	return &{{.GetName}}NrpcHandler{
 		ctx:    ctx,
 		nc:     nc,
 		server: s,
@@ -124,8 +98,8 @@ func New{{.GetName}}Handler(ctx context.Context, nc nrpc.NatsConn, s {{.GetName}
 	}
 }
 
-func New{{.GetName}}ConcurrentHandler(workers *nrpc.WorkerPool, nc nrpc.NatsConn, s {{.GetName}}Server) *{{.GetName}}Handler {
-	return &{{.GetName}}Handler{
+func New{{.GetName}}ConcurrentHandler(workers *nrpc.WorkerPool, nc nrpc.NatsConn, s {{.GetName}}Server) *{{.GetName}}NrpcHandler {
+	return &{{.GetName}}NrpcHandler{
 		workers: workers,
 		nc:      nc,
 		server:  s,
@@ -133,11 +107,11 @@ func New{{.GetName}}ConcurrentHandler(workers *nrpc.WorkerPool, nc nrpc.NatsConn
 }
 
 // SetEncodings sets the output encodings when using a '*Publish' function
-func (h *{{.GetName}}Handler) SetEncodings(encodings []string) {
+func (h *{{.GetName}}NrpcHandler) SetEncodings(encodings []string) {
 	h.encodings = encodings
 }
 
-func (h *{{.GetName}}Handler) Subject() string {
+func (h *{{.GetName}}NrpcHandler) Subject() string {
 	return "{{$pkgSubjectPrefix}}
 	{{- range $pkgSubjectParams -}}
 		*.
@@ -185,7 +159,7 @@ func (h *{{$serviceName}}Handler) {{.GetName}}Publish(
 
 {{- if ServiceNeedsHandler .}}
 
-func (h *{{.GetName}}Handler) Handler(msg *nats.Msg) {
+func (h *{{.GetName}}NrpcHandler) Handler(msg *nats.Msg) {
 	var ctx context.Context
 	if h.workers != nil {
 		ctx = h.workers.Context
@@ -235,7 +209,7 @@ func (h *{{.GetName}}Handler) Handler(msg *nats.Msg) {
 		}
 		var req {{GoType .GetInputType}}
 		if err := nrpc.Unmarshal(request.Encoding, msg.Data, &req); err != nil {
-			log.Printf("{{.GetName}}Handler: {{.GetName}} request unmarshal failed: %v", err)
+			log.Printf("{{.GetName}}NrpcHandler: {{.GetName}} request unmarshal failed: %v", err)
 			immediateError = &nrpc.Error{
 				Type: nrpc.Error_CLIENT,
 				Message: "bad request received: " + err.Error(),
@@ -274,20 +248,20 @@ func (h *{{.GetName}}Handler) Handler(msg *nats.Msg) {
 				, mtParams[{{ $i }}]
 				{{- end -}}
 				{{- if ne .GetInputType ".nrpc.Void" -}}
-				, req
+				, &req
 				{{- end -}}
 				)
 				if err != nil {
 					return nil, err
 				}
-				return &innerResp, err
+				return innerResp, err
 			}
 			{{- end }}
 		}
 		{{- end}}{{/* not HasStreamedReply */}}
 {{- end}}{{/* range .Method */}}
 	default:
-		log.Printf("{{.GetName}}Handler: unknown name %q", name)
+		log.Printf("{{.GetName}}NrpcHandler: unknown name %q", name)
 		immediateError = &nrpc.Error{
 			Type: nrpc.Error_CLIENT,
 			Message: "unknown name: " + name,
@@ -331,7 +305,7 @@ func (h *{{.GetName}}Handler) Handler(msg *nats.Msg) {
 
 	if immediateError != nil {
 		if err := request.SendReply(nil, immediateError); err != nil {
-			log.Printf("{{.GetName}}Handler: {{.GetName}} handler failed to publish the response: %s", err)
+			log.Printf("{{.GetName}}NrpcHandler: {{.GetName}} handler failed to publish the response: %s", err)
 {{- if Prometheus}}
 			serverRequestsFor{{$serviceName}}.WithLabelValues(
 				request.MethodName, request.Encoding, "handler_fail").Inc()
@@ -346,7 +320,7 @@ func (h *{{.GetName}}Handler) Handler(msg *nats.Msg) {
 }
 {{- end}}
 
-type {{.GetName}}Client struct {
+type {{.GetName}}NrpcClient struct {
 	nc      nrpc.NatsConn
 	{{- if ne 0 (len $pkgSubject)}}
 	PkgSubject string
@@ -362,15 +336,15 @@ type {{.GetName}}Client struct {
 	Timeout time.Duration
 }
 
-func New{{.GetName}}Client(nc nrpc.NatsConn
+func New{{.GetName}}NrpcClient(nc nrpc.NatsConn
 	{{- range $pkgSubjectParams -}}
 	, pkgParam{{.}} string
 	{{- end -}}
 	{{- range GetServiceSubjectParams . -}}
 	, svcParam{{ . }} string
 	{{- end -}}
-	) *{{.GetName}}Client {
-	return &{{.GetName}}Client{
+	) *{{.GetName}}NrpcClient {
+	return &{{.GetName}}NrpcClient{
 		nc:      nc,
 		{{- if ne 0 (len $pkgSubject)}}
 		PkgSubject: "{{$pkgSubject}}",
@@ -392,7 +366,7 @@ func New{{.GetName}}Client(nc nrpc.NatsConn
 {{- $resultType := GetResultType .}}
 {{- if eq .GetInputType ".nrpc.NoRequest"}}
 
-func (c *{{$serviceName}}Client) {{.GetName}}Subject(
+func (c *{{$serviceName}}NrpcClient) {{.GetName}}Subject(ctx context.Context, 
 	{{range GetMethodSubjectParams .}}mt{{.}} string,{{end}}
 ) string {
 	subject := {{ if ne 0 (len $pkgSubject) -}}
@@ -424,7 +398,7 @@ func (s *{{$serviceName}}{{.GetName}}Subscription) Next(timeout time.Duration) (
 	return
 }
 
-func (c *{{$serviceName}}Client) {{.GetName}}SubscribeSync(
+func (c *{{$serviceName}}NrpcClient) {{.GetName}}SubscribeSync(
 	{{range GetMethodSubjectParams .}}mt{{.}} string,{{end}}
 ) (sub *{{$serviceName}}{{.GetName}}Subscription, err error) {
 	subject := c.{{.GetName}}Subject(
@@ -438,7 +412,7 @@ func (c *{{$serviceName}}Client) {{.GetName}}SubscribeSync(
 	return
 }
 
-func (c *{{$serviceName}}Client) {{.GetName}}Subscribe(
+func (c *{{$serviceName}}NrpcClient) {{.GetName}}Subscribe(
 	{{range GetMethodSubjectParams .}}mt{{.}} string,{{end}}
 	handler func ({{GoType .GetOutputType}}),
 ) (sub *nats.Subscription, err error) {
@@ -457,7 +431,7 @@ func (c *{{$serviceName}}Client) {{.GetName}}Subscribe(
 	return
 }
 
-func (c *{{$serviceName}}Client) {{.GetName}}SubscribeChan(
+func (c *{{$serviceName}}NrpcClient) {{.GetName}}SubscribeChan(
 	{{range GetMethodSubjectParams .}}mt{{.}} string,{{end}}
 ) (<-chan {{GoType .GetOutputType}}, *nats.Subscription, error) {
 	ch := make(chan {{GoType .GetOutputType}})
@@ -471,7 +445,7 @@ func (c *{{$serviceName}}Client) {{.GetName}}SubscribeChan(
 
 {{- else if HasStreamedReply .}}
 
-func (c *{{$serviceName}}Client) {{.GetName}}(
+func (c *{{$serviceName}}NrpcClient) {{.GetName}}(
 	ctx context.Context,
 	{{- range GetMethodSubjectParams . -}}
 	{{ . }} string,
@@ -530,7 +504,7 @@ func (c *{{$serviceName}}Client) {{.GetName}}(
 }
 {{- else}}
 
-func (c *{{$serviceName}}Client) {{.GetName}}(
+func (c *{{$serviceName}}NrpcClient) {{.GetName}}(ctx context.Context, 
 	{{- range GetMethodSubjectParams . -}}
 	{{ . }} string, {{ end -}}
 	{{- if ne .GetInputType ".nrpc.Void" -}}
@@ -559,7 +533,7 @@ func (c *{{$serviceName}}Client) {{.GetName}}(
 	{{- if eq .GetOutputType ".nrpc.Void" ".nrpc.NoReply"}}
 	var resp {{GoType .GetOutputType}}
 	{{- end}}
-	err = nrpc.Call(&req, &resp, c.nc, subject, c.Encoding, c.Timeout)
+	err = nrpc.Call(ctx, &req, &resp, c.nc, subject, c.Encoding, c.Timeout)
 	if err != nil {
 {{- if Prometheus}}
 		clientCallsFor{{$serviceName}}.WithLabelValues(
@@ -595,7 +569,7 @@ type Client struct {
 	{{- end}}
 
 	{{- range .Service}}
-	{{.GetName}} *{{.GetName}}Client
+	{{.GetName}} *{{.GetName}}NrpcClient
 	{{- end}}
 }
 
@@ -616,7 +590,7 @@ func NewClient(nc nrpc.NatsConn
 	}
 	{{- range .Service}}
 	{{- if eq 0 (len (GetServiceSubjectParams .))}}
-	c.{{.GetName}} = New{{.GetName}}Client(nc
+	c.{{.GetName}} = New{{.GetName}}NrpcClient(nc
 	{{- range $pkgSubjectParams -}}
 		, c.pkgParam{{ . }}
 	{{- end}})
@@ -651,7 +625,7 @@ func (c *Client) Set{{.GetName}}Params(
 	{{ . }} string,
 	{{- end}}
 ) {
-	c.{{.GetName}} = New{{.GetName}}Client(
+	c.{{.GetName}} = New{{.GetName}}NrpcClient(
 		c.nc,
 	{{- range $pkgSubjectParams}}
 		c.pkgParam{{ . }},
@@ -668,8 +642,8 @@ func (c *Client) New{{.GetName}}(
 	{{- range GetServiceSubjectParams .}}
 	{{ . }} string,
 	{{- end}}
-) *{{.GetName}}Client {
-	client := New{{.GetName}}Client(
+) *{{.GetName}}NrpcClient {
+	client := New{{.GetName}}NrpcClient(
 		c.nc,
 	{{- range $pkgSubjectParams}}
 		c.pkgParam{{ . }},

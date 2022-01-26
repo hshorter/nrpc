@@ -206,7 +206,8 @@ func ParseSubjectTail(
 	return
 }
 
-func Call(req proto.Message, rep proto.Message, nc NatsConn, subject string, encoding string, timeout time.Duration) error {
+func Call(ctx context.Context, req proto.Message, rep proto.Message, nc NatsConn, subject string, encoding string, timeout time.Duration) error {
+	// TODO added context, can use this to populate headers for e.g. span ID in the future
 	// encode request
 	rawRequest, err := Marshal(encoding, req)
 	if err != nil {
